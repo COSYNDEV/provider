@@ -136,20 +136,29 @@ function copy_image_to_cluster() {
 	local build_image=$1
 	local final_image=$2
 	validate_container_cmd
-	if [ -z "$(${CONTAINER_CMD} images -q "${build_image}")" ]; then
+	
+	# Get the image hash for precise caching
+	local image_hash=$(${CONTAINER_CMD} images --format "{{.ID}}" --no-trunc "${build_image}")
+	
+	if [ -z "${image_hash}" ]; then
 		${CONTAINER_CMD} pull "${build_image}"
+		image_hash=$(${CONTAINER_CMD} images --format "{{.ID}}" --no-trunc "${build_image}")
 	fi
+	
 	if [[ "${VM_DRIVER}" == "none" ]]; then
 		${CONTAINER_CMD} tag "${build_image}" "${final_image}"
 		return
 	fi
 
 	# "minikube ssh" fails to read the image, so use standard ssh instead
-	${CONTAINER_CMD} save "${build_image}" | \
+	${CONTAINER_CMD} save "${image_hash}" | \
 		ssh \
 			-o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no \
 			-i "$(${minikube} ssh-key)" -l docker \
 			"$(${minikube} ip)" docker image load
+	
+	# Retag the loaded image with the expected name
+	${minikube} ssh "docker tag ${image_hash} ${final_image}"
 }
 
 case "${1:-}" in
